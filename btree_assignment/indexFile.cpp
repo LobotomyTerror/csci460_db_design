@@ -262,7 +262,8 @@ void inorderPrint(std::fstream &file, long curr = ROOT_NODE) {
 
     if (ib.data.left != EMPTY_NODE)
         inorderPrint(file, ib.data.left);
-    std::cout << ib.data.first << " Pos: " << ib.data.dataPos << " l: " << ib.data.left << " r: " << ib.data.right << std::endl;
+    std::cout << ib.data.first << " Pos: " << ib.data.dataPos << 
+        " l: " << ib.data.left << " r: " << ib.data.right << std::endl;
     if (ib.data.right != EMPTY_NODE)
         inorderPrint(file, ib.data.right);
 }
