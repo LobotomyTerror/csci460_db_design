@@ -2,126 +2,260 @@
 #include <cstring>
 #include <fstream>
 
-const int MAXBYTES = 32;
-const long FILENULL = 0;
+using namespace std;
 
-class __attribute__((packed))DataItems {
-    public:
-    int b;
-    double a;
-    bool c;
-
-    friend std::ostream & operator <<(std::ostream &out, DataItems &item) {
-        out << "a:" << item.a << ", b:" << item.b << ", c:"; 
-            if (item.c) out << "T";
-            else out << "F";
-        return out << std::endl;
-    }
+class __attribute__ ((packed)) DataItems{
+  public:
+  int b;
+  double a;
+  bool c;
+  // unsigned char first[8];
+  //char last[20];
+  //char address[100];
+  friend ostream & operator <<(ostream &out,DataItems &item){
+    out << "a:"<< item.a << ", b:"<< item.b << ", c:";
+    if (item.c) out << "T";
+    else out << "F";
+    return out << endl;
+  }
 };
 
-class __attribute__((packed))Data {
-    public:
-    union dataList {
-        DataItems data;
-        long next;
-        // long left, right; binary tree concept
-    };
-    bool used;
-    char gap[MAXBYTES - sizeof(DataItems) - 1]; // Assumes size of DataItems is larger than long
-
-    friend std::ostream & operator <<(std::ostream &out, Data &item) {
-        if (item.used) 
-            out << "Data Node: " << item.dataList.data;
-        else
-            out << "Linked List Node: " << item.dataList.next;
-        out << std::endl;
-    }
-
-    // Will be one greater than the actual nuber of records
-    static long getSize(std::istream &in) {
-        in.seekg(0, std::ios_base::end);
-        return in.tellg() / sizeof(Data) - 1;
-    }
-    void write(std::ostream &out, long pos, bool setUsed = true) {
-        out.seekp(pos*sizeof(Data));
-        if (setUsed) used = true;
-        out.write(reinterpret_cast<char *>(this), sizeof(Data));
-        out.flush();
-    }
-    void read(std::istream &in, long pos) {
-        in.seekg(pos*sizeof(Data));
-        in.read(reinterpret_cast<char *>(this), sizeof(Data));
-    }
-
-    static void createDB(std::string fname) {
-        Data d;
-        d.used = false;
-        d.dataList.next = FILENULL;
-        std::ofstream fout;
-        fout.open(fname);
-        d.write(fout, FILENULL, false);
-        fout.close();
-    }
-
-    static long dataNew(std::istream &in) {
-        long n = getSize(in);
-        for (int i = 0; i < n; ++i) {
-            Data d;
-            d.read(in, i);
-            if (d.used == false) return i;
-        }
-        return n;
-    }
-    static void dataDelete(std::ostream &out, long pos) {
-        Data d;
-        d.used = false;
-        d.write(out, pos, false);
-    }
+union DataList{
+    DataItems data;
+    long next;
 };
 
-class __attribute__((packed)) Database {
-    public:
-    std::fstream file;
-    static void createDB(std::string fname) {
-        Data::createDB(fname);
+const int MAXBYTES=16;
+const long FILENULL=0;
+class __attribute__ ((packed)) Data {
+  public:
+  DataList dataList;
+  bool used;
+  // Assumes size of DataItems is larger than long
+  char gap[MAXBYTES-sizeof(DataItems)-1];
+
+
+  Data(DataItems &d){
+    dataList.data=d;
+  }
+  Data(){
+    used = true;
+    dataList.next = FILENULL;
+  }
+  friend ostream & operator <<(ostream &out,Data &item){
+    if (item.used) 
+      out << "Data Node:" << item.dataList.data;
+    else 
+      out << "Link List Node:" << item.dataList.next;
+    return out << endl;
+  }
+
+  static long getSize(istream &in){
+    in.seekg(0,ios_base::end);
+    return in.tellg()/sizeof(Data)-1;
+  }
+
+  void write(fstream &file, long pos, bool setUsed=true){  // Needs to update freelist
+    file.seekp(pos*sizeof(Data));
+    if(setUsed) used=true;
+    file.write(reinterpret_cast<char *>(this), sizeof(Data));
+    file.flush();
+  }
+
+  void read(istream &in,long pos) {
+    in.seekg(pos*sizeof(Data));
+    in.read(reinterpret_cast<char *>(this), sizeof(Data));
+  }
+ 
+  static void createDB(string fname){
+    Data d;
+    d.used=true;
+    d.dataList.next=FILENULL;
+    fstream fout;
+    fout.open(fname, ios::out | ios::binary);
+    d.write(fout,FILENULL,false);
+    fout.close();
+  }
+  
+  static long dataNew(fstream &file){
+    // Read in the head node to find free spaces
+    Data head;
+    head.read(file, 0);
+
+    if (head.dataList.next == FILENULL) {
+      long endOfFilePos = getSize(file) + 1;
+      
+      Data newBlock;
+      newBlock.used = false;
+      newBlock.dataList.next = FILENULL;
+
+      newBlock.write(file, endOfFilePos, false);
+
+      return endOfFilePos;
+    } else {
+      Data tail;
+      tail.read(file, head.dataList.next);
+
+      long filePos = head.dataList.next;
+      head.dataList.next = tail.dataList.next;
+      tail.dataList.next = FILENULL;
+
+      head.write(file, 0);
+      file.seekp(filePos * sizeof(Data));
+      file.write(reinterpret_cast<char *>(&tail), sizeof(Data));
+
+      return filePos;
     }
-    // Constructor should open the database file and keep the file handle for us
-    Database(std::string fname) {
-        file.open(fname);
+  }
+
+  // Free space and link head to new free block
+  static void dataDelete(fstream &file, long pos) {
+    if (pos == 0) { // Checking if head node is being accessed
+      std::cout << "Accessing head node is not allowed" << std::endl;
+      exit(1);
     }
-    Data write(long pos) {
-        Data d;
-        d.write(file, pos, true);
-        return d;
+
+    if (pos > getSize(file)) {
+      std::cout << "Cannot delete, position is out of bounds" << std::endl;
+      exit(2);
     }
-    void read(Data d, long pos) {
-        d.read(file, pos);
+
+    file.seekg(0, ios::beg);
+    long headPos;
+    file.read(reinterpret_cast<char *>(&headPos), sizeof(long));
+
+    if (headPos == FILENULL) {
+      Data d, head;
+      d.read(file, pos);
+      head.read(file, headPos);
+
+      if (!d.used) {
+        std::cout << "Position is already free" << std::endl;
+        return;
+      }
+
+      d.dataList.data.a = 0.0;
+      d.dataList.data.b = 0;
+      d.dataList.data.c = false;
+      d.used = false;
+
+      d.dataList.next = FILENULL;
+
+      file.seekp(pos*sizeof(Data));
+      file.write(reinterpret_cast<char *>(&d), sizeof(Data));
+
+      head = d;
+      head.dataList.next = pos;
+      head.write(file, headPos, false);
+    } else {
+      Data d, head, tail;
+
+      d.read(file, pos);
+      head.read(file, 0);
+      tail.read(file, headPos);
+
+      if (!d.used) {
+        std::cout << "Position is already free" << std::endl;
+        return;
+      }
+
+      d.dataList.data.a = 0.0;
+      d.dataList.data.b = 0;
+      d.dataList.data.c = false;
+      d.used = false;
+
+      if (tail.dataList.next == FILENULL) {
+        auto tailPos = head.dataList.next;
+        d.dataList.next = tailPos;
+        head.dataList.next = pos;
+        head.write(file, 0, false);
+      } else {
+        auto tailPos = tail.dataList.next;
+        tail.dataList.next = pos;
+        d.dataList.next = tailPos;
+        tail.write(file, headPos, false);
+      }
+
+      file.seekp(pos*sizeof(Data));
+      file.write(reinterpret_cast<char *>(&d), sizeof(Data));
     }
-    ~Database() {
-        file.flush();
-        file.close();
-    }
+
+    std::cout << "Empty block at position: " << pos << std::endl;
+  }
+};
+
+class Database{
+  public:
+  fstream file;
+  static void createDB(string fname){
+    Data::createDB(fname);
+  }
+  long getSize() {
+    return Data::getSize(file);
+  }
+  // Constructor should open the database file and keep the file handle for us
+  Database(string fname){
+    ifstream test;
+    test.open(fname);
+    if (!test.good())
+      Database::createDB(fname);
+    else 
+      test.close();
+    file.open(fname);
+  }
+  void write(long pos, DataItems &d){
+    Data(d).write(file, pos, true);
+  }
+  DataItems read(long pos) {
+    Data d;
+    d.read(file, pos);
+    return d.dataList.data;
+  }
+  void dataDelete(long pos){
+    Data::dataDelete(file, pos);
+  }
+  long dataNew() {
+    return Data::dataNew(file);
+  }
+  ~Database(){
+    file.flush();
+    file.close();
+  }
 };
 
 int main() {
-    Data::dataList d;
-    Data e;
-    d.data.a = -1.0;
-    d.data.b = -1;
-    d.data.c = true;
-    std::ofstream fout;
-    std::ifstream fin;
-    fout.open("Data.bin");
-    d.write(fout, 0);
-    e.read(fin, 0);
-    d.data.a += 2;
-    d.data.b += 2;
-    d.data.c = true;
-    std::cout << Data::getSize(fin) << std::endl;
-    d.write(fout, 4);
-    std::cout << Data::getSize(fin) << std::endl;
-    Data::dataDelete(fout, 0);
-    long pos = Data::dataNew(fin);
-    std::cout << "Pos: " << pos << std::endl;
+  DataItems d;
+  Database db("Data.bin");
 
+  d.a = -1.0;
+  d.b = -1;
+  d.c = true;
+  db.write(db.dataNew(), d);
+
+  d.b+=2;
+  d.a+=2;
+  d.c=true;
+  db.write(db.dataNew(), d);
+
+  db.dataDelete(1);
+  db.dataDelete(2);
+
+  d.a = -1.0;
+  d.b = -1;
+  d.c = true;
+  db.write(db.dataNew(), d);
+
+  d.b+=2;
+  d.a+=2;
+  d.c=true;
+  db.write(db.dataNew(), d);
+
+  d.b = 3;
+  d.a = 3.0;
+  d.c = true;
+  db.write(db.dataNew(), d);
+  db.dataDelete(3);
+  db.dataDelete(1);
+  db.dataDelete(2);
+  db.dataDelete(4); // Should produce an out of bounds error based on the build out of my file
 }

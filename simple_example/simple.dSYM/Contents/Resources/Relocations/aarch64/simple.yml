@@ -1,5 +1,5 @@
 ---
 triple:          'arm64-apple-darwin'
-binary-path:     simple
+binary-path:     '/Users/danielfishbein/Documents/csci460_db_design/simple_example/simple'
 relocations:     []
 ...

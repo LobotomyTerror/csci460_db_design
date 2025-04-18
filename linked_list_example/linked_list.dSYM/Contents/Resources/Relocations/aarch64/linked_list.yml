@@ -1,0 +1,5 @@
+---
+triple:          'arm64-apple-darwin'
+binary-path:     '/Users/danielfishbein/Documents/csci460_db_design/linked_list_example/linked_list'
+relocations:     []
+...
