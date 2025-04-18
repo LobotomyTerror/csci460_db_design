@@ -19,7 +19,7 @@ struct __attribute__((packed)) IndexDataNode
 struct __attribute__((packed)) LLNode
 {
     /* data */
-    char padding[35];
+    char padding[sizeof(IndexDataNode) - 9];
     bool used;
     long next;
 };
